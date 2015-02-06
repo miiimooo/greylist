@@ -1,0 +1,150 @@
+/**   $Id: prethreadedtests.cpp 8 2009-08-23 03:21:36Z mimo $   **/
+
+//: C03:StringSuite.cpp
+//{L} ../TestSuite/Test ../TestSuite/Suite
+//{L} TrimTest
+// Illustrates a test suite for code from Chapter 3
+#include <iostream>
+#include "../TestSuite/Suite.h"
+#include <string>
+#include <cstddef>
+#include <memory>
+
+// c
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <errno.h>
+#include <string.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netdb.h>
+#include <arpa/inet.h>
+#include <sys/wait.h>
+#include <signal.h>
+#include <deque>
+
+// /c
+// #include <gc/leak_detector.h>
+
+#include "zthread/Thread.h"
+// #include "zthread/ThreadedExecutor.h"
+// #include "zthread/AtomicCount.h"
+// #include "zthread/Mutex.h"
+// #include "zthread/Guard.h"
+// #include "zthread/Condition.h"
+
+#include "defensive.h"
+#include "filedescriptor.h"
+// #include "blockingaccept.h"
+// #include "blockingacceptnoqueue.h"
+#include "tcplistener.h"
+// #include "prethreadedserver.h"
+#include "singleacceptthreadpool.h"
+#include "requesthandler.h"
+
+using namespace std;
+using namespace TestSuite;
+using namespace ZThread;
+using namespace Greylist;
+
+#define MAXDATASIZE 100 // max number of bytes we can get at once 
+class Runner : public Runnable {
+  unsigned _id;
+public:
+  Runner(int id) : _id(id) { }
+  void run() {
+    unsigned i = 0;
+    while(!Thread::interrupted()) {
+      i++;
+      Thread::sleep(1);
+      if (i%1000 == 1) {
+	cout << "#" << _id << " i " << i << endl;
+      }
+    }
+  }
+};
+class ServerTests : public Test {
+  public:
+//     void run() {
+//       PoolExecutor executor(1);
+//       for (int i=0; i < 100; i++) {
+// 	executor.execute(new Runner(i));
+//       }
+//       vector<unsigned> sizes;
+//       sizes.push_back(2);
+//       sizes.push_back(10);
+//       sizes.push_back(100);
+//       sizes.push_back(50);
+//       sizes.push_back(2);
+//       sizes.push_back(70);
+//       sizes.push_back(1000);
+//       vector<unsigned>::const_iterator itr = sizes.begin();
+//       while(true) {
+// 	Thread::sleep(1000);
+// 	executor.size((*itr));
+// 	itr++;
+// 	if (itr == sizes.end()) {
+// 	  itr = sizes.begin();
+// 	}
+//       }
+    void run() {
+	//       FileDescriptor stdin(0);
+      TCPListener *listener = new TCPListener("", "4096");
+      test_(listener != 0);
+      SingleAcceptThreadPool<TestRequestHandler>* server = 
+	new SingleAcceptThreadPool<TestRequestHandler>(listener, 50, 10, 100, 5000);
+      Thread t(server);
+      t.wait();
+      cout << "server finished"<<endl;
+//       Task t(&server);
+    }
+};
+
+class LiftOff : public ZThread::Runnable {
+  int countDown;
+  int id;
+  public:
+    LiftOff(int count, int ident = 0) :
+    countDown(count), id(ident) {}
+    ~LiftOff() {
+      std::cout << id << " completed" << std::endl;
+    }
+    void run() {
+      while(countDown--)
+	std::cout << id << ":" << countDown << std::endl;
+      std::cout << "Liftoff!" << std::endl;
+    }
+};
+class PoolTest : public Test {
+  unsigned long num;
+public:
+  PoolTest(unsigned long u) : num(u) { }
+  void run() {
+    try {
+      
+      // Constructor argument is minimum number of threads:
+      PoolExecutor executor(num);
+      unsigned long i = 0;
+      while(!Thread::interrupted()) {
+	executor.execute(new LiftOff(10, i++));
+      }
+    } catch(Synchronization_Exception& e) {
+      cerr << e.what() << endl;
+    }
+    
+  }
+};
+int main(int argc, char *argv[]) {
+  Suite suite("Server Tests");
+//   suite.addTest(new PoolTest(atoi(argv[1])));
+  suite.addTest(new ServerTests);
+  //   suite.addTest(new SelectTest);
+  //   suite.addTest(new Chatserver);
+  suite.run();
+  long nFail = suite.report();
+  suite.free();
+//   CHECK_LEAKS();
+  return nFail;
+}
